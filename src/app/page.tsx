@@ -1,15 +1,39 @@
 "use client";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Grid, Box, Text } from "@react-three/drei";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useControls, button, folder } from "leva";
+import { createClient } from '@supabase/supabase-js';
+
+// --- SUPABASE BAĞLANTISI ---
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+);
 
 export default function Home() {
   const [devices, setDevices] = useState<any[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
+  // 1. ADIM: SAYFA AÇILDIĞINDA VERİLERİ SUPABASE'DEN ÇEK
+  useEffect(() => {
+    const fetchData = async () => {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('layout_data')
+        .eq('project_name', 'Saha-01')
+        .single();
+      
+      if (data && data.layout_data) {
+        setDevices(data.layout_data.devices || []);
+      }
+    };
+    fetchData();
+  }, []);
+
   const selectedDevice = devices.find(d => d.id === selectedId);
 
+  // 2. ADIM: LEVA PANELİNE KAYDET BUTONU EKLE
   useControls("SAHA EDİTÖRÜ", {
     "CİHAZ EKLE": folder({
       "SENSÖR": button(() => {
@@ -19,6 +43,19 @@ export default function Home() {
           color: "red",
           name: `S-${prev.length + 1}`
         }]);
+      }),
+    }),
+    "BULUT İŞLEMLERİ": folder({
+      "PROJEYİ KAYDET": button(async () => {
+        const { error } = await supabase
+          .from('projects')
+          .upsert([{ 
+            project_name: 'Saha-01', 
+            layout_data: { devices } 
+          }], { onConflict: 'project_name' });
+        
+        if (error) alert("Hata: " + error.message);
+        else alert("Tüm saha yerleşimi Supabase'e kaydedildi!");
       }),
     }),
     ...(selectedId ? {
@@ -54,10 +91,9 @@ export default function Home() {
 
   return (
     <main style={{ width: "100vw", height: "100vh", background: "#f0f0f0" }}>
-      {/* HATALI YER DÜZELTİLDİ: zIndex yapıldı */}
       <div style={{ position: "absolute", zIndex: 10, padding: 20, color: '#222', pointerEvents: 'none' }}>
-        <h2 style={{ margin: 0 }}>Saha Tasarım v4.6</h2>
-        <p>Sensöre tıkla, sağdaki panelden yerini değiştir.</p>
+        <h2 style={{ margin: 0 }}>Saha Tasarım v4.7 (Cloud)</h2>
+        <p>Cihazları yerleştir ve 'PROJEYİ KAYDET'e bas.</p>
       </div>
 
       <Canvas camera={{ position: [8, 8, 8] }}>
@@ -77,8 +113,6 @@ export default function Home() {
                 color={selectedId === device.id ? "#ffea00" : "#333"} 
                 emissive={selectedId === device.id ? "#ffea00" : "black"}
                 emissiveIntensity={0.5}
-                metalness={0.6}
-                roughness={0.2}
               />
             </Box>
             <Text position={[0, 0.7, 0]} fontSize={0.2} color="black" fontWeight="bold">
