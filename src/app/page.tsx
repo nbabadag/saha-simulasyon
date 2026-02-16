@@ -1,101 +1,87 @@
 "use client";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { OrbitControls, Grid, Box, Text, Stars, Cylinder } from "@react-three/drei";
-import { useState, useEffect, useRef } from "react";
+import { OrbitControls, Grid, Box, Text, Stars } from "@react-three/drei";
+import { useState, useEffect } from "react";
 import { useControls, button, folder } from "leva";
 import { createClient } from '@supabase/supabase-js';
-import * as THREE from "three";
 
-// --- SUPABASE BAĞLANTISI ---
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 );
 
-// --- SENSÖR BİLEŞENİ (PLC MANTIĞI DAHİL) ---
-function Sensor({ device, isSelected, onSelect, boxPos }: any) {
-  const [isActive, setIsActive] = useState(false);
-
-  // Mesafe Algılama (PLC Giriş Simülasyonu)
-  useEffect(() => {
-    const dist = Math.sqrt(
-      Math.pow(device.pos[0] - boxPos[0], 2) + 
-      Math.pow(device.pos[2] - boxPos[2], 2)
-    );
-    setIsActive(dist < 0.6);
-  }, [boxPos, device.pos]);
-
-  return (
-    <group position={device.pos} onClick={(e) => { e.stopPropagation(); onSelect(device.id); }}>
-      <Box args={[0.5, 0.5, 0.5]}>
-        <meshStandardMaterial 
-          color={isSelected ? "#ffea00" : "#333"} 
-          metalness={0.8}
-          roughness={0.2}
-        />
-      </Box>
-      {/* Sensör Lensi (Aktifse Yeşil Yanar) */}
-      <mesh position={[0, 0.26, 0]}>
-        <cylinderGeometry args={[0.15, 0.15, 0.05]} />
-        <meshBasicMaterial color={isActive ? "#00ff00" : "#ff0000"} />
-      </mesh>
-      <Text position={[0, 0.8, 0]} fontSize={0.2} color="black" fontWeight="bold">
-        {device.name} {isActive ? "(ON)" : "(OFF)"}
-      </Text>
-    </group>
-  );
-}
-
-// --- ANA SİMÜLASYON MOTORU ---
 export default function Home() {
   const [devices, setDevices] = useState<any[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [boxPos, setBoxPos] = useState<[number, number, number]>([-4.5, 0.3, 0]);
+  const [selectedId, setSelectedId] = useState<any>(null);
+  const [boxPos, setBoxPos] = useState<[number, number, number]>([-4, 0.4, 0]);
   const [isRunning, setIsRunning] = useState(false);
+  const [motorSpeed, setMotorSpeed] = useState(0.04);
 
-  // 1. ADIM: BULUTTAN VERİ ÇEKME
-  useEffect(() => {
-    const loadProject = async () => {
-      const { data } = await supabase
-        .from('projects')
-        .select('layout_data')
-        .eq('project_name', 'Saha-01')
-        .single();
-      if (data?.layout_data?.devices) setDevices(data.layout_data.devices);
-    };
-    loadProject();
-  }, []);
+  // --- ANA PLC DÖNGÜSÜ ---
+  useFrame(() => {
+    if (!isRunning) return;
 
-  // 2. ADIM: KONTROL PANELİ (LEVA)
+    let currentSpeed = 0.04; // Normal çalışma hızı
+    let sensorTriggered = false;
+
+    // Her bir sensörü kontrol et
+    devices.forEach(sensor => {
+      // Sensör ile Kutu arasındaki mesafe hesabı
+      const distance = Math.sqrt(
+        Math.pow(sensor.pos[0] - boxPos[0], 2) + 
+        Math.pow(sensor.pos[2] - boxPos[2], 2)
+      );
+
+      // Algılama mesafesi (0.5 birim)
+      if (distance < 0.5) {
+        sensorTriggered = true;
+        // EĞER SENSÖRÜN İŞLEVİ "DURDUR" İSE
+        if (sensor.action === 'STOP') {
+          currentSpeed = 0; 
+        }
+      }
+    });
+
+    setMotorSpeed(currentSpeed);
+    setBoxPos(prev => [prev[0] + currentSpeed, prev[1], prev[2]]);
+
+    // Kutu bant sonuna gelirse başa dön (Lup)
+    if (boxPos[0] > 6) setBoxPos([-4, 0.4, 0]);
+  });
+
+  // --- KONTROL PANELİ ---
   const selectedDevice = devices.find(d => d.id === selectedId);
 
-  useControls("FABRİKA KONTROL PANELİ", {
-    "SİMÜLASYON": folder({
+  useControls("FACTORY OS v6.1", {
+    "SİSTEM": folder({
       "BAŞLAT / DURDUR": button(() => setIsRunning(!isRunning)),
-      "RESET (KUTU)": button(() => setBoxPos([-4.5, 0.3, 0])),
+      "KUTUYU RESETLE": button(() => setBoxPos([-4, 0.4, 0])),
     }),
-    "CİHAZ KÜTÜPHANESİ": folder({
-      "YENİ SENSÖR EKLE": button(() => {
+    "CİHAZ EKLE": folder({
+      "SENSÖR EKLE": button(() => {
         setDevices(prev => [...prev, {
           id: Date.now(),
-          pos: [Math.random() * 2, 0.25, Math.random() * 2],
-          name: `S-${prev.length + 1}`
+          pos: [2, 0.3, 0], // Varsayılan konum
+          name: `SENSÖR-${prev.length + 1}`,
+          action: 'NONE' // Varsayılan işlevsiz
         }]);
       }),
     }),
-    "BULUT SERVİSİ": folder({
-      "TÜM SAHAYI KAYDET": button(async () => {
-        const { error } = await supabase
-          .from('projects')
-          .upsert({ project_name: 'Saha-01', layout_data: { devices } }, { onConflict: 'project_name' });
-        if (error) alert("Hata: " + error.message);
-        else alert("Saha yerleşimi buluta başarıyla işlendi!");
+    "BULUT": folder({
+      "SAHAYI KAYDET": button(async () => {
+        await supabase.from('projects').upsert({ project_name: 'Saha-01', layout_data: { devices } }, { onConflict: 'project_name' });
+        alert("Kaydedildi!");
       }),
     }),
     ...(selectedId ? {
-      [`DÜZENLE: ${selectedDevice?.name}`]: folder({
-        "Konum X": { value: selectedDevice?.pos[0], min: -10, max: 10, onChange: (v) => updatePos(0, v) },
-        "Konum Z": { value: selectedDevice?.pos[2], min: -10, max: 10, onChange: (v) => updatePos(2, v) },
+      [`AYARLAR: ${selectedDevice?.name}`]: folder({
+        "Konum X": { value: selectedDevice.pos[0], min: -5, max: 5, onChange: (v) => updateDevice('pos', 0, v) },
+        "Konum Z": { value: selectedDevice.pos[2], min: -2, max: 2, onChange: (v) => updateDevice('pos', 2, v) },
+        "SENSÖR İŞLEVİ": { 
+          options: { "Sadece Oku": 'NONE', "Motoru Durdur": 'STOP' }, 
+          value: selectedDevice.action,
+          onChange: (v) => updateDevice('action', null, v)
+        },
         "CİHAZI SİL": button(() => {
           setDevices(prev => prev.filter(d => d.id !== selectedId));
           setSelectedId(null);
@@ -104,12 +90,15 @@ export default function Home() {
     } : {})
   }, [selectedId, devices, isRunning]);
 
-  const updatePos = (axis: number, val: number) => {
+  const updateDevice = (key: string, idx: any, val: any) => {
     setDevices(prev => prev.map(d => {
       if (d.id === selectedId) {
-        const newPos = [...d.pos];
-        newPos[axis] = val;
-        return { ...d, pos: newPos };
+        if (idx !== null) {
+          const newPos = [...d.pos];
+          newPos[idx] = val;
+          return { ...d, pos: newPos };
+        }
+        return { ...d, [key]: val };
       }
       return d;
     }));
@@ -118,59 +107,46 @@ export default function Home() {
   return (
     <main style={{ width: "100vw", height: "100vh", background: "#f0f0f0" }}>
       <div style={{ position: "absolute", zIndex: 10, padding: 20, color: '#222', pointerEvents: 'none' }}>
-        <h2 style={{ margin: 0 }}>Saha Master v5.0</h2>
-        <p>Sensörleri diz, kaydet ve simülasyonu başlat.</p>
-        <p>Durum: <b>{isRunning ? "ÇALIŞIYOR" : "DURDU"}</b></p>
+        <h2>Saha Tasarım v6.1</h2>
+        <p>Sensör İşlevi: <b>{selectedDevice?.action === 'STOP' ? 'Durdurucu' : 'İzleyici'}</b></p>
       </div>
 
-      <Canvas camera={{ position: [10, 8, 10] }}>
-        <ambientLight intensity={1} />
-        <pointLight position={[10, 10, 10]} intensity={1.5} />
+      <Canvas camera={{ position: [8, 5, 8] }}>
+        <ambientLight intensity={0.8} />
+        <pointLight position={[10, 10, 10]} />
         <OrbitControls makeDefault enabled={!selectedId} />
-        <Stars radius={100} depth={50} count={500} factor={4} />
-        <Grid infiniteGrid cellSize={1} sectionSize={5} cellColor="#999" sectionColor="#444" fadeDistance={30} />
+        <Grid infiniteGrid cellSize={1} sectionSize={5} cellColor="#999" sectionColor="#444" />
 
         {/* Yürüyen Bant */}
         <Box args={[12, 0.1, 2]} position={[0, -0.05, 0]}>
           <meshStandardMaterial color="#222" />
         </Box>
 
-        {/* Hareket Eden Kutu */}
-        <BoxWithLogic isRunning={isRunning} pos={boxPos} setPos={setBoxPos} />
+        {/* Kutu */}
+        <Box position={boxPos} args={[0.6, 0.6, 0.6]}>
+          <meshStandardMaterial color="orange" />
+        </Box>
 
-        {/* Dinamik Sensörler */}
+        {/* Sensörler */}
         {devices.map((device) => (
-          <Sensor 
-            key={device.id} 
-            device={device} 
-            isSelected={selectedId === device.id} 
-            onSelect={setSelectedId} 
-            boxPos={boxPos}
-          />
+          <group key={device.id} position={device.pos} onClick={(e) => { e.stopPropagation(); setSelectedId(device.id); }}>
+            <Box args={[0.4, 0.4, 0.4]}>
+              <meshStandardMaterial color={selectedId === device.id ? "yellow" : "#444"} />
+            </Box>
+            {/* Sensörün "Gözü" */}
+            <mesh position={[0, 0, 0.25]}>
+                <sphereGeometry args={[0.08]} />
+                <meshBasicMaterial color={device.action === 'STOP' ? "cyan" : "red"} />
+            </mesh>
+            <Text position={[0, 0.6, 0]} fontSize={0.2} color="black" fontWeight="bold">{device.name}</Text>
+          </group>
         ))}
 
-        {/* Boşlukta seçimi bırakma alanı */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, 0]} onClick={() => setSelectedId(null)}>
           <planeGeometry args={[100, 100]} />
           <meshStandardMaterial transparent opacity={0} />
         </mesh>
       </Canvas>
     </main>
-  );
-}
-
-// --- KUTU HAREKET MANTIĞI ---
-function BoxWithLogic({ isRunning, pos, setPos }: any) {
-  useFrame(() => {
-    if (isRunning) {
-      setPos((prev: any) => [prev[0] + 0.04, prev[1], prev[2]]);
-      if (pos[0] > 6) setPos([-4.5, 0.3, 0]); // Başa dön
-    }
-  });
-
-  return (
-    <Box position={pos} args={[0.6, 0.6, 0.6]}>
-      <meshStandardMaterial color="orange" metalness={0.4} roughness={0.5} />
-    </Box>
   );
 }
