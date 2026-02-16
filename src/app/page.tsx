@@ -3,46 +3,64 @@ import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Stars, Box, Text, Cylinder } from "@react-three/drei";
 import { createClient } from '@supabase/supabase-js';
 import { useControls, button } from "leva";
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState } from "react";
 import * as THREE from "three";
 
-// --- SUPABASE BAĞLANTISI ---
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 );
 
-function PhysicalScene({ settings }: any) {
+function WorkshopScene({ settings }: any) {
   const boxRef = useRef<THREE.Mesh>(null);
-  const [phase, setPhase] = useState('MOVING');
-
+  
+  // PLC Simülasyon Döngüsü
   useFrame(() => {
-    if (boxRef.current && phase === 'MOVING') {
-      boxRef.current.position.x += settings.bantHizi;
-      if (boxRef.current.position.x >= settings.sensorX) {
-        setPhase('STOPPED');
-      }
+    if (boxRef.current && boxRef.current.position.x < settings.sensorX) {
+      boxRef.current.position.x += 0.04;
     }
   });
 
   return (
     <>
-      <gridHelper args={[20, 20, 0x555555, 0x333333]} />
-      {/* Bant */}
+      <gridHelper args={[20, 20, 0x444444, 0x222222]} />
+      
+      {/* --- ELEKTRİK PANOSU --- */}
+      <group position={[0, 2, -4]}>
+        {/* Pano Gövdesi */}
+        <Box args={[4, 5, 1]}>
+          <meshStandardMaterial color="#333" metalness={0.6} roughness={0.2} />
+        </Box>
+        {/* Pano İç Rayı (DIN Rail) */}
+        <Box args={[3.5, 0.1, 0.2]} position={[0, 1, 0.45]}>
+          <meshStandardMaterial color="silver" />
+        </Box>
+        
+        {/* Pano Kapağı (Dinamik) */}
+        <group position={[2, 0, 0.5]} rotation={[0, settings.panoKapagi ? -Math.PI / 1.5 : 0, 0]}>
+          <Box args={[4, 5, 0.1]} position={[-2, 0, 0]}>
+            <meshStandardMaterial color="#444" metalness={0.5} transparent opacity={0.9} />
+          </Box>
+          <Text position={[-2, 0, 0.1]} fontSize={0.2} color="yellow">DİKKAT: YÜKSEK GERİLİM</Text>
+        </group>
+
+        {/* Panonun İçindeki Örnek PLC */}
+        {settings.panoKapagi && (
+          <Box args={[1, 1.2, 0.5]} position={[-1, 1, 0.7]}>
+            <meshStandardMaterial color="#555" />
+            <Text position={[0, 0, 0.26]} fontSize={0.1} color="white">S7-1200 CPU</Text>
+          </Box>
+        )}
+      </group>
+
+      {/* Bant ve Kutu */}
       <Box args={[10, 0.1, 2]} position={[0, -0.05, 0]}>
         <meshStandardMaterial color="#111" />
       </Box>
-      {/* Sensör */}
-      <group position={[settings.sensorX, 0.5, 1]}>
-        <Box args={[0.3, 0.3, 0.3]}><meshStandardMaterial color="#444" /></Box>
-        <Cylinder args={[0.01, 0.01, 2]} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -1]}>
-          <meshBasicMaterial color="red" transparent opacity={0.4} />
-        </Cylinder>
-      </group>
-      {/* Kutu */}
       <Box ref={boxRef} args={[0.6, 0.6, 0.6]} position={[-4.5, 0.3, 0]}>
         <meshStandardMaterial color="orange" />
       </Box>
+
       <OrbitControls />
     </>
   );
@@ -50,32 +68,23 @@ function PhysicalScene({ settings }: any) {
 
 export default function Home() {
   const settings = useControls({
-    projectID: { value: 'Saha-01' },
-    bantHizi: { value: 0.04, min: 0, max: 0.2 },
+    panoKapagi: false,
     sensorX: { value: 2, min: -3, max: 3 },
-    "BULUTA KAYDET": button(async () => {
+    "PROJEYİ BULUTA YAZ": button(async () => {
       const { data, error } = await supabase
         .from('projects')
-        .upsert([{ 
-          project_name: 'Saha-01', 
-          layout_data: { bantHizi: 0.04, sensorX: 2 } // Örnek veri
-        }]);
-      if (error) alert("Hata: " + error.message);
-      else alert("Ayarlar Supabase'e başarıyla gönderildi!");
+        .insert([{ project_name: 'Pano Tasarımı 1', layout_data: { sensorX: 2 } }]);
+      if (!error) alert("Pano ayarları kaydedildi!");
     })
   });
 
   return (
     <main style={{ width: "100vw", height: "100vh", background: "#050505" }}>
-      <div style={{ position: "absolute", zIndex: 1, color: "white", padding: 20 }}>
-        <h1>Endüstriyel Simülasyon v2.0</h1>
-        <small>Supabase Bulut Bağlantısı: AKTİF</small>
-      </div>
-      <Canvas camera={{ position: [8, 8, 8] }}>
+      <Canvas camera={{ position: [8, 5, 12] }}>
         <Stars />
         <ambientLight intensity={0.5} />
-        <pointLight position={[10, 10, 10]} />
-        <PhysicalScene settings={settings} />
+        <pointLight position={[10, 10, 10]} intensity={1} />
+        <WorkshopScene settings={settings} />
       </Canvas>
     </main>
   );
