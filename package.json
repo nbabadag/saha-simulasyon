@@ -1,27 +1,113 @@
-{
-  "name": "web-simulasyon-projesi",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
-  },
-  "dependencies": {
-    "next": "14.2.3",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
-    "three": "0.160.0",
-    "@react-three/fiber": "8.16.0",
-    "@react-three/drei": "9.105.0",
-    "@supabase/supabase-js": "2.42.0",
-    "leva": "0.9.35"
-  },
-  "devDependencies": {
-    "typescript": "5.4.5",
-    "@types/node": "20.12.7",
-    "@types/react": "18.2.79",
-    "@types/react-dom": "18.2.25",
-    "@types/three": "0.163.0"
-  }
+"use client";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { OrbitControls, Stars, Box, Text, Cylinder } from "@react-three/drei";
+import { useRef, useState } from "react";
+import { useControls } from "leva";
+import * as THREE from "three";
+
+// --- PLC VE SİMÜLASYON BİLEŞENİ ---
+function PLCSystem() {
+  const boxRef = useRef<THREE.Mesh>(null);
+  
+  // Kontrol Paneli
+  const { bantHizi, sensorX, plcModu } = useControls({
+    bantHizi: { value: 0.04, min: 0, max: 0.2, step: 0.01 },
+    sensorX: { value: 2, min: -3, max: 3, step: 0.5 },
+    plcModu: { options: ['OTOMATİK', 'MANUEL', 'STOP'] }
+  });
+
+  // PLC I/O Durumları (Hafıza)
+  const [inputs, setInputs] = useState({ I0_0: false }); // Sensör Girişi
+  const [outputs, setOutputs] = useState({ Q0_0: true });  // Bant Motoru Çıkışı
+
+  useFrame(() => {
+    if (!boxRef.current || plcModu === 'STOP') return;
+
+    // 1. ADIM: SENSÖR OKUMA (INPUT)
+    const mesafe = Math.abs(boxRef.current.position.x - sensorX);
+    const sensorSinyali = mesafe < 0.3;
+    
+    if (sensorSinyali !== inputs.I0_0) {
+      setInputs({ I0_0: sensorSinyali });
+    }
+
+    // 2. ADIM: PLC MANTIĞI (LOGIC)
+    // Eğer Sensör (I0.0) aktifse, Motoru (Q0.0) durdur.
+    if (plcModu === 'OTOMATİK') {
+      if (inputs.I0_0) {
+        setOutputs({ Q0_0: false });
+      } else {
+        setOutputs({ Q0_0: true });
+      }
+    }
+
+    // 3. ADIM: FİZİKSEL HAREKET (EXECUTION)
+    if (outputs.Q0_0) {
+      boxRef.current.position.x += bantHizi;
+    }
+  });
+
+  return (
+    <>
+      <gridHelper args={[20, 20, 0x555555, 0x333333]} />
+      
+      {/* Bant */}
+      <Box args={[10, 0.1, 2]} position={[0, -0.05, 0]}>
+        <meshStandardMaterial color="#111" />
+      </Box>
+
+      {/* Sensör Gövdesi ve Lazer Işığı */}
+      <group position={[sensorX, 0.5, 1]}>
+        <Box args={[0.3, 0.3, 0.3]}><meshStandardMaterial color="#444" /></Box>
+        <Cylinder args={[0.02, 0.02, 2]} rotation={[Math.PI / 2, 0, 0]} position={[0, 0, -1]}>
+          <meshBasicMaterial color={inputs.I0_0 ? "red" : "cyan"} transparent opacity={0.3} />
+        </Cylinder>
+      </group>
+
+      {/* Kutu */}
+      <Box ref={boxRef} args={[0.6, 0.6, 0.6]} position={[-4.5, 0.3, 0]}>
+        <meshStandardMaterial color="orange" />
+      </Box>
+
+      {/* PLC Pano Görseli (Basit) */}
+      <group position={[-4, 2, -3]}>
+        <Box args={[2, 3, 0.2]}><meshStandardMaterial color="#2c3e50" /></Box>
+        <Text position={[0, 1.2, 0.11]} fontSize={0.2} color="white">PLC S7-1200</Text>
+        {/* I/O LED'leri */}
+        <mesh position={[-0.5, 0.5, 0.11]}>
+          <circleGeometry args={[0.1]} />
+          <meshBasicMaterial color={inputs.I0_0 ? "orange" : "#111"} />
+        </mesh>
+        <Text position={[0, 0.5, 0.11]} fontSize={0.15}>I0.0 (Sensör)</Text>
+        
+        <mesh position={[-0.5, 0, 0.11]}>
+          <circleGeometry args={[0.1]} />
+          <meshBasicMaterial color={outputs.Q0_0 ? "lime" : "#111"} />
+        </mesh>
+        <Text position={[0, 0, 0.11]} fontSize={0.15}>Q0.0 (Motor)</Text>
+      </group>
+
+      {/* Reset Butonu */}
+      <Box position={[-6, 0.5, 0]} onClick={() => {
+        if(boxRef.current) boxRef.current.position.x = -4.5;
+        setOutputs({ Q0_0: true });
+      }}>
+        <meshStandardMaterial color="blue" />
+      </Box>
+    </>
+  );
+}
+
+export default function Home() {
+  return (
+    <main style={{ width: "100vw", height: "100vh", background: "#050505" }}>
+      <Canvas camera={{ position: [10, 8, 10] }}>
+        <OrbitControls />
+        <Stars />
+        <ambientLight intensity={0.5} />
+        <pointLight position={[10, 10, 10]} intensity={1.5} />
+        <PLCSystem />
+      </Canvas>
+    </main>
+  );
 }
